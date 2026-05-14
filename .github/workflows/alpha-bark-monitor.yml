@@ -9,6 +9,8 @@
 # 并允许 Actions 写回仓库（用于提交状态文件）：
 #   Settings → Actions → General → Workflow permissions
 #     勾选 "Read and write permissions"
+#
+# 手动测试 Bark：Actions → 本 workflow → Run workflow → 模式选「仅测试 Bark」
 
 name: Alpha123 Bark (every 5 min)
 
@@ -17,6 +19,14 @@ on:
     # 每 5 分钟（UTC）。GitHub 可能略有延迟，不会严格卡秒。
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "运行模式"
+        type: choice
+        options:
+          - monitor
+          - bark-test
+        default: monitor
 
 concurrency:
   group: alpha-bark-${{ github.ref }}
@@ -35,12 +45,20 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Test Bark only (no Alpha poll / no git commit)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'bark-test'
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: python tools/bark_test_send.py
+
       - name: Poll Alpha123 and notify via Bark
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'monitor')
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
         run: python tools/alpha_github_monitor.py
 
       - name: Commit fingerprint state (only when file changed)
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'monitor')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
