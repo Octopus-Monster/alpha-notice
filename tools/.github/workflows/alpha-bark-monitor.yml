@@ -1,0 +1,57 @@
+# 每 5 分钟（UTC）检查 Alpha123「今日空投」指纹；仅当「今日至少有一条空投」且指纹变化时发 Bark。
+# 使用说明见仓库内 tools/alpha_github_monitor.py 顶部注释。
+#
+# 首次使用前请在 GitHub 设置：
+#   Settings → Secrets and variables → Actions → New repository secret
+#     名称: BARK_URL
+#     值:   https://api.day.app/你的Key   （与 Bark App 里一致，不要含 title/body）
+#
+# 并允许 Actions 写回仓库（用于提交状态文件）：
+#   Settings → Actions → General → Workflow permissions
+#     勾选 "Read and write permissions"
+
+name: Alpha123 Bark (every 5 min)
+
+on:
+  schedule:
+    # 每 5 分钟（UTC）。GitHub 可能略有延迟，不会严格卡秒。
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: alpha-bark-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Poll Alpha123 and notify via Bark
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: python tools/alpha_github_monitor.py
+
+      - name: Commit fingerprint state (only when file changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ ! -f data/alpha_monitor_state.json ]; then
+            echo "Expected data/alpha_monitor_state.json from monitor script."
+            exit 1
+          fi
+          git add data/alpha_monitor_state.json
+          if git diff --staged --quiet; then
+            echo "No commit needed (fingerprint unchanged)."
+          else
+            git commit -m "chore(monitor): update Alpha123 today fingerprint"
+            git push
+          fi
